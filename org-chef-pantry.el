@@ -116,4 +116,5 @@ REGEXP."
               (org-chef-checkmark-items-in-pantry pantry))
             recipe-lists))))
 
+(provide 'org-chef-pantry)
 ;;; org-chef-pantry.el ends here

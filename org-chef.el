@@ -72,7 +72,7 @@
       (org-set-property "cook-time" (format "%s" (cdr (assoc 'cook-time recipe))))
       (org-set-property "ready-in" (format "%s" (cdr (assoc 'ready-in recipe))))
       (org-return)
-      (org-chef-insert-ingredients-list (cdr (assoc 'ingredients recipe)))
+      (org-chef-insert-org-list (cdr (assoc 'ingredients recipe)))
       (org-return)
       (org-return)
       (org-insert-subheading t)
