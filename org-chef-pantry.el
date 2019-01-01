@@ -1,57 +1,68 @@
-(defun parse-recipe-ingredient (ingredients-paragraph)
-  (substring-no-properties (caddr ingredients-paragraph)))
+;;; org-chef-pantry.el --- Pantry feature for org-chef.    -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2018 Calvin Beck
 
-(defun ingredient-in-pantry (pantry-ingredients recipe-ingredient)
-  (when-let ((pantry-ingredient (car pantry-ingredients)))
-    (if (string-match-p pantry-ingredient recipe-ingredient) t
-      (ingredient-in-pantry (cdr pantry-ingredients) recipe-ingredient))))
+;; Author:  John Collins
+;; URL: https://github.com/jmicahc/org-chef
+;; Created: 2018
 
+;; Copyright 2018 Calvin Beck
 
-(defun check-ingredients-list (pantry ingredients-headline)
-  (org-element-map ingredients-headline 'item
-    (lambda (item)
-      (if (ingredient-in-pantry pantry (parse-recipe-ingredient
-                                        (org-element-map item 'paragraph
-                                          (lambda (item) item) nil t)))
-          (org-element-put-property item :checkbox 'on)
-        (org-element-put-property item :checkbox 'off)))
-    nil
-    t))
+;; Permission is hereby granted, free of charge, to any person
+;; obtaining a copy of this software and associated documentation
+;; files (the "Software"), to deal in the Software without
+;; restriction, including without limitation the rights to use, copy,
+;; modify, merge, publish, distribute, sublicense, and/or sell copies
+;; of the Software, and to permit persons to whom the Software is
+;; furnished to do so, subject to the following conditions:
 
+;; The above copyright notice and this permission notice shall be
+;; included in all copies or substantial portions of the Software.
 
-(defun checkbox-ingredients (pantry org-tree)
-  (org-element-map org-tree 'headline
-    (lambda (item)
-      (when (member "recipe" (org-element-property :tags item))
-        (check-ingredients-list pantry item))
-      item)))
+;; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+;; EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+;; MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+;; NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+;; BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+;; ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+;; CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+;; SOFTWARE.
 
+;;; Commentary:
 
-(defun parse-pantry-ingredient (paragraph-item)
-  (caddr paragraph-item))
+;; Pantry feature for org-chef.
 
+;;; Code:
+(require 'org-element)
+(require 'subr-x)
 
-(defun parse-pantry (pantry-headline)
+(defun org-chef-parse-pantry (pantry-headline)
+  "Parse out item strings in plain-list element under PANTRY-HEADLINE element."
   (let ((ingredients '()))
     (org-element-map pantry-headline 'paragraph
       (lambda (item)
-        (when-let ((ingredient (parse-pantry-ingredient item)))
+        (when-let (ingredient (caddr item))
           (setq ingredients (cons (string-trim (substring-no-properties ingredient))
                                   ingredients)))))
     ingredients))
 
 
-(defun read-pantry (org-tree)
+(defun org-chef-read-pantry (org-tree)
+  "Walks ORG-TREE, returning a list of parsed pantry regex strings."
   (org-element-map org-tree 'headline
-    (lambda (item) item
+    (lambda (item)
+      item
       (when (equal (org-element-property :raw-value item) "Pantry")
-        (parse-pantry item)))
+        (org-chef-parse-pantry item)))
     nil
     t))
 
 
-(defun find-recipe-lists (org-tree)
+(defun org-chef-find-recipe-lists (org-tree)
+  "Return a list of parsed recipe lists.
+
+ Walks ORG-TREE looking for every list that is the child of
+ a headline with a :recipe: tag."
   (let ((recipe-lists '()))
     (org-element-map org-tree 'headline
       (lambda (headline)
@@ -61,71 +72,48 @@
     recipe-lists))
 
 
-;;;###autoload
-(defun update-recipes ()
-  (interactive)
-  (let* ((org-tree (org-element-parse-buffer))
-         (pantry (read-pantry org-tree)))
-    (checkbox-ingredients pantry org-tree)
-    (setf (buffer-string) "")
-    (insert (org-element-interpret-data org-tree))
-    (org-update-checkbox-count-maybe t)))
-
-
-
-
-(with-current-buffer "recipes.org"
-  (setq org-tree (org-element-parse-buffer))
-  (setq recipe-lists (find-recipe-lists org-tree))
-  (save-excursion
-    (mapc (lambda (plain-list)
-            (goto-char (org-element-property :begin plain-list))
-            (update-checkbox))
-          recipe-lists))
-   ;; (setq pantry (read-pantry org-tree))
-   ;; (checkbox-ingredients pantry org-tree)
-   ;;(with-current-buffer "*scratch*"
-   ;;  (setf (buffer-string) "")
-   ;;  (insert (format "%s" (length recipe-lists)))
-   ;;  ;; (elisp-format-buffer)
-   ;;  ;;(org-update-checkbox-count-maybe t)
-   ;;  )
-   )
-
-(let ((org-tree (org-element-parse-buffer))
-      (recipe-lists (find-recipe-lists org-tree)))
-  (mapc (lambda (plain-list)
-          (goto-char (org-element-property :begin plain-list))
-          (update-checkbox))
-        recipe-lists))
-
-(defun item-contains-ingredient-p (ingredient item struct)
-  (re-search-forward ingredient (org-list-get-item-end item struct) t))
-
-
-(defun item-in-pantry-p (pantry item struct)
+(defun org-chef-item-in-pantry-p (pantry item struct)
+  "Return t if ITEM is in PANTRY."
   (when-let (pantry-ingredient (car pantry))
-    (or (item-contains-ingredient-p pantry-ingredient item struct)
-        (item-in-pantry-p (cdr pantry) item struct))))
+    (or (re-search-forward pantry-ingredient (org-list-get-item-end item struct) t)
+        (org-chef-item-in-pantry-p (cdr pantry) item struct))))
+
+
+(defun org-chef-checkmark-items-in-pantry (pantry)
+  "Checkmark recipe items that match at least one of PANTRY items."
+  (let* ((struct (org-list-struct))
+         (struct-copy (copy-tree struct))
+         (item (org-list-get-list-begin (org-list-get-item-begin)
+                                        struct
+                                        (org-list-prevs-alist struct)))
+         (prevs (org-list-prevs-alist struct)))
+    (while item
+      (goto-char item)
+      (if (org-chef-item-in-pantry-p pantry item struct)
+          (org-list-set-checkbox item struct "[X]")
+        (org-list-set-checkbox item struct "[ ]"))
+      (setq item (org-list-get-next-item item struct prevs)))
+    (org-list-write-struct struct (org-list-parents-alist struct) struct-copy)
+    (org-update-checkbox-count)))
 
 
 ;;;###autoload
-(defun update-checkbox ()
+(defun org-chef-update-recipes ()
+  "Checkmarks recipe items that are in the Pantry.
+
+Reads ingredients listed in the Pantry headline and
+checkmarks any recipe list item that matches at least one
+ingredient in the pantry. An ingredient matches if
+`re-search-foward' succeds using the pantry item as the
+REGEXP."
   (interactive)
   (save-excursion
     (let* ((org-tree (org-element-parse-buffer))
-           (pantry (read-pantry org-tree))
-           (struct (org-list-struct))
-           (struct-copy (copy-tree struct))
-           (item (org-list-get-list-begin (org-list-get-item-begin)
-                                          struct
-                                          (org-list-prevs-alist struct)))
-           (prevs (org-list-prevs-alist struct)))
-      (while item
-        (goto-char item)
-        (if (item-in-pantry-p pantry item struct)
-            (org-list-set-checkbox item struct "[X]")
-          (org-list-set-checkbox item struct "[ ]"))
-        (setq item (org-list-get-next-item item struct prevs)))
-      (org-list-write-struct struct (org-list-parents-alist struct) struct-copy)
-      (org-update-checkbox-count))))
+           (pantry (org-chef-read-pantry org-tree))
+           (recipe-lists (org-chef-find-recipe-lists org-tree)))
+      (mapc (lambda (recipe-list)
+              (goto-char (org-element-property :begin recipe-list))
+              (org-chef-checkmark-items-in-pantry pantry))
+            recipe-lists))))
+
+;;; org-chef-pantry.el ends here
